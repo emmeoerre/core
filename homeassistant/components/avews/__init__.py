@@ -13,7 +13,7 @@ from homeassistant.helpers.typing import ConfigType
 from .const import DOMAIN
 from .web_server import AveWebServer
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SWITCH]
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -26,14 +26,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AVE ws from a config entry."""
-    # Forward the entry to the binary sensor platform
 
-    WS = AveWebServer(entry.data["ip_address"])
-    if not await WS.authenticate():
+    webserver = AveWebServer(entry.data, entry.data["get_entities_names"], hass)
+    if not await webserver.authenticate():
         _LOGGER.error("AVEWS: Cannot connect to the web server")
 
-    entry.runtime_data = WS
+    entry.runtime_data = webserver
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    hass.loop.create_task(webserver.start())
 
     return True
 
@@ -41,7 +42,4 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     # Disconnect the WebSocket server
-    web_server: AveWebServer = hass.data[DOMAIN].pop(entry.entry_id)
-    await web_server.disconnect()
-
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

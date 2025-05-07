@@ -2,52 +2,106 @@
 
 import asyncio
 import logging
+from types import MappingProxyType
 from typing import Any
 
 import aiohttp
 
-from .binary_sensor import MotionBinarySensor
+from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class AveWebServerSettings:
+    """AVE web server settings class."""
+
+    host: str
+    get_entity_names: bool
+    fetch_sensor_areas: bool
+    fetch_sensors: bool
+    fetch_lights: bool
+    fetch_scenarios: bool
+
+    def __init__(self):
+        """Initialize the settings."""
+        self.host = ""
+        self.get_entity_names = False
+        self.fetch_sensor_areas = False
+        self.fetch_sensors = False
+        self.fetch_lights = False
+        self.fetch_scenarios = False
 
 
 class AveWebServer:
     """AVE web server class."""
 
-    def __init__(self, host: str) -> None:
+    def __init__(
+        self,
+        settings_data: MappingProxyType[str, Any],
+        get_entity_names: bool,
+        hass: HomeAssistant,
+    ) -> None:
         """Initialize."""
-        self.host = host
-        self.ws_conn = None
+        self.settings = AveWebServerSettings()
+        try:
+            self.settings = AveWebServerSettings()
+            self.settings.host = settings_data["ip_address"]
+            self.settings.get_entity_names = settings_data["get_entities_names"]
+            self.settings.fetch_sensor_areas = settings_data["fetch_sensor_areas"]
+            self.settings.fetch_sensors = settings_data["fetch_sensors"]
+            self.settings.fetch_lights = settings_data["fetch_lights"]
+        except KeyError as e:
+            _LOGGER.error("Missing key in settings data: %s", e)
+        self.hass = hass
+        self.ws_conn: Any = None
         self._connected = False
         self.device_list: list[Any] = []
         self.wstask: asyncio.Task
         self.started = False
         self.closed = False
-        self.binary_sensors: dict[
-            str, MotionBinarySensor
-        ] = {}  # Track binary sensors by unique ID
-        self.binary_sensor_async_add_entities = None
+        self.binary_sensors: dict = {}  # Track binary sensors by unique ID
+        self.update_binary_sensor: Any = None
+        self.async_add_bs_entities: Any = None
+        self.switches: dict = {}  # Track switches by unique ID
+        self.async_add_sw_entities: Any = None
+        self.update_switch: Any = None
 
-    async def set_binary_sensor_async_add_entities(self, async_add_entities) -> None:
+    async def set_update_binary_sensor(self, func) -> None:
+        """Set the set_update_binary_sensor method for binary sensors."""
+        self.update_binary_sensor = func
+
+    async def set_update_switch(self, func) -> None:
+        """Set the set_update_switch method for switches."""
+        self.update_switch = func
+
+    async def set_async_add_bs_entities(self, func) -> None:
         """Set the async_add_entities method for binary sensors."""
-        self.binary_sensor_async_add_entities = async_add_entities
+        if self.async_add_bs_entities is None:
+            self.async_add_bs_entities = func
+
+    async def set_async_add_sw_entities(self, func) -> None:
+        """Set the async_add_entities method for switches."""
+        if self.async_add_sw_entities is None:
+            self.async_add_sw_entities = func
 
     async def is_connected(self) -> bool:
         """Return if the web server is connected."""
         return self._connected
 
     async def authenticate(self) -> bool:
-        """Test if we can authenticate with the host."""
-        self.wstask = asyncio.create_task(self.connect())
+        """Authenticate with the WebSocket server."""
+        try:
+            session = aiohttp.ClientSession()
+            self.ws_conn = await session.ws_connect(
+                f"ws://{self.settings.host}:14001",
+                protocols=["binary"],
+            )
+            self._connected = True
+            _LOGGER.debug("Connected to WebSocket server at %s", self.settings.host)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Failed to connect to WebSocket server: %s", err)
+            return False
         return True
-
-    async def start(self) -> None:
-        """Start the WebSocket connection."""
-        if self.ws_conn is None or self.ws_conn.closed:
-            await self.connect()
-
-        self.started = True
-        await self.on_connect_actions()
 
     async def disconnect(self) -> None:
         """Disconnect from the web server."""
@@ -56,51 +110,57 @@ class AveWebServer:
             await self.ws_conn.close()
             self.ws_conn = None
             self._connected = False
-            _LOGGER.info("WebSocket disconnected!", extra={"host": self.host})
+            _LOGGER.info("WebSocket disconnected!", extra={"host": self.settings.host})
 
-    async def connect(self):
-        """Connect to the web server."""
-        session = aiohttp.ClientSession()
-        try:
-            self.ws_conn = await session.ws_connect(
-                f"ws://{self.host}:14001",
-                protocols=["binary"],
-            )
-            self._connected = True
-            _LOGGER.info("WebSocket connected!", extra={"host": self.host})
+    async def start(self) -> None:
+        """Start the WebSocket connection and listen for messages."""
+        if self.started:
+            _LOGGER.debug("WebSocket connection already started")
+            return
 
-            if self.started:
-                await self.on_connect_actions()
+        self.started = True
+        _LOGGER.debug("Starting WebSocket connection")
 
-            async for msg in self.ws_conn:
-                if msg.type == aiohttp.WSMsgType.BINARY:
-                    await self.on_message(msg.data)
-                elif msg.type == aiohttp.WSMsgType.ERROR:
-                    _LOGGER.error("WebSocket error", extra={"error": msg.data})
-                    break
+        while not self.closed:
+            try:
+                if not self._connected or self.ws_conn is None or self.ws_conn.closed:
+                    _LOGGER.debug("Attempting to connect to WebSocket server")
+                    if not await self.authenticate():
+                        _LOGGER.error("Failed to authenticate with WebSocket server")
+                        await asyncio.sleep(5)
+                        continue
 
-        except aiohttp.ClientError as e:
-            _LOGGER.error("WebSocket connection failed", exc_info=e)
-        finally:
-            self._connected = False
-            if self.closed:
-                _LOGGER.info("WebSocket connection closed by user")
-            else:
-                _LOGGER.warning("WebSocket closed. Reconnecting in 5 seconds")
-                await asyncio.sleep(5)
-                await self.connect()
+                if self.started:
+                    await self.on_connect_actions()
+
+                async for msg in self.ws_conn:
+                    if msg.type == aiohttp.WSMsgType.BINARY:
+                        await self.on_message(msg.data)
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        _LOGGER.error("WebSocket error", extra={"error": msg.data})
+                        break
+
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("WebSocket connection error: %s", err)
+                self._connected = False
+                await asyncio.sleep(5)  # Retry after a delay
+
+        _LOGGER.debug("WebSocket connection stopped")
 
     async def on_connect_actions(self):
         """Actions to perform after connecting to the web server."""
+        if self.ws_conn is None or self.ws_conn.closed:
+            return
+        await self.send_ws_command("LDI")  # Get device list
 
-        # Get status by family type 1 (lights)
-        await self.send_ws_command("GSF", "1")
+        if self.settings.fetch_lights:
+            # Get status by family type 1 (lights)
+            await self.send_ws_command("GSF", "1")
 
         # Get status by family type 12 (motion detection areas)
-        await self.send_ws_command("GSF", ["12"])
-
-        # potentially replaces GSF command for type 12
-        await self.send_ws_command("WSF", "12")
+        if self.settings.fetch_sensor_areas:
+            await self.send_ws_command("GSF", ["12"])
+            await self.send_ws_command("WSF", "12")
 
         await self.send_ws_command("SU3")  # Start streaming updates (most of them)
         # await self.send_ws_command("SU2") # Starts streaming updates (UPD for TLO and XU , NET and CLD messages)
@@ -109,7 +169,7 @@ class AveWebServer:
         """Return the herawstringalue of a number."""
         return hex(value)[2:].upper()
 
-    def build_crc(self, rawstring):
+    async def build_crc(self, rawstring):
         """Build CRC for the given string."""
         crc = 0
         for char in rawstring:
@@ -145,7 +205,7 @@ class AveWebServer:
         if parameters:
             message += chr(0x1D) + chr(0x1D).join(parameters)
         message += chr(0x03)
-        crc = self.build_crc(message)
+        crc = await self.build_crc(message)
         full_message = message + crc + chr(0x04)
         if self.ws_conn and not self.ws_conn.closed:
             await self.ws_conn.send_str(full_message)
@@ -165,6 +225,8 @@ class AveWebServer:
             self.manage_gsf(parameters, records)
         elif command == "upd":
             self.manage_upd(parameters, records)
+        elif command == "ldi":
+            self.manage_ldi(parameters, records)
         elif command == "cld":
             # cloud commands received from SU2
             pass
@@ -173,7 +235,8 @@ class AveWebServer:
             pass
         else:
             _LOGGER.error(
-                "Unknown command",
+                "Unknown command %s",
+                command,
                 extra={
                     "command": command,
                     "parameters": parameters,
@@ -183,13 +246,21 @@ class AveWebServer:
 
     def manage_upd(self, parameters, records):
         """Manage UPD commands received from the web server."""
-        _LOGGER.debug(
-            "Received UPD command. Parameters: %s Records: %s", parameters, records
-        )
+        # _LOGGER.debug(
+        #     "Received UPD command. Parameters: %s Records: %s", parameters, records
+        # )
         if parameters[0] == "WS":
-            pass
+            device_type, device_id, device_status = (
+                int(parameters[1]),
+                int(parameters[2]),
+                int(parameters[3]),
+            )
+            if device_id > 200000:
+                # Devices with ID > 2000000 must be scenarios or something...
+                pass
+            elif device_type == 1 and self.settings.fetch_lights:
+                self.update_switch(self, device_type, device_id, device_status, None)
             # Async device updates. Will replace the polling approach
-            # Devices with ID > 2000000 must be scenarios or something...
 
             # device_type = int(parameters[1])
             # device_id = int(parameters[2])
@@ -203,6 +274,10 @@ class AveWebServer:
             #             if "id" in device and "type" in device and int(device["id"]) == device_id and int(device["type"]) == device_type:
             #                 device["currentVal"] = device_status
         elif parameters[0] == "X" and parameters[1] == "A":  # ANTITHEFT AREA
+            if not self.settings.fetch_sensor_areas:
+                # If the user doesn't want to fetch sensor areas, skip this
+                return
+
             # parameters[2] is the area ID. all other parameters are == 0 when triggered, parameters[6] == 1 when cleared
             # really sensitive, better use a polling approach for now
 
@@ -213,10 +288,15 @@ class AveWebServer:
             status = 1
             if area_clear > 0:
                 status = 0
-            self.update_binary_sensors(12, area_progressive, status)
+            self.update_binary_sensor(self, 12, area_progressive, status)
             # log_with_timestamp(f"{ANTITHEFT_PREFIX} XA - areaID: {area_progressive} - engaged: {area_engaged} - clear: {area_clear} - alarm: {area_in_alarm}")
         elif parameters[0] == "X" and parameters[1] == "S":  # ANTITHEFT SENSOR
-            self.update_binary_sensors(1007, int(parameters[2]), int(parameters[4]))
+            if self.settings.fetch_sensors:
+                # If the user doesn't want to fetch sensors, skip this
+                return
+            self.update_binary_sensor(
+                self, 1007, int(parameters[2]), int(parameters[4])
+            )
         elif parameters[0] == "X" and parameters[1] == "U":
             # ANTITHEFT UNIT (requires SU2)
             _LOGGER.debug("XU Antitheft Unit - engaged", extra={"id": parameters[2]})
@@ -243,7 +323,11 @@ class AveWebServer:
             # Reload gui
             pass
         else:
-            _LOGGER.warning("Not yet handled UPD", extra={"parameters": parameters})
+            _LOGGER.warning(
+                "Not yet handled UPD %s",
+                parameters[0],
+                extra={"parameters": parameters},
+            )
 
     def manage_gsf(self, parameters, records):
         """Manage GSF Get Status by Family commands received from the web server."""
@@ -255,43 +339,73 @@ class AveWebServer:
         if parameters[0] in ["7", "12"]:  # Motion detection types
             for record in records:
                 device_id, device_status = int(record[0]), int(record[1])
-                self.update_binary_sensors(int(parameters[0]), device_id, device_status)
+                self.update_binary_sensor(
+                    self, int(parameters[0]), device_id, device_status
+                )
 
         if parameters[0] == "1":
             for record in records:
                 device_id, device_status = int(record[0]), int(record[1])
+                self.update_switch(self, 1, device_id, device_status, None)
                 # send_mqtt_message(device_id, device_status)
 
-    def update_binary_sensors(self, family, device_id, device_status):
-        """Update binary sensors based on the family and device status."""
-
-        if family not in [12, 1007]:
-            _LOGGER.debug(
-                " Not updating binary sensor for family %s, device_id %s",
-                family,
-                device_id,
-            )
-            return
+    def manage_ldi(self, parameters, records):
+        """Manage LDI List Devices commands received from the web server."""
         _LOGGER.debug(
-            " Updating binary sensor for family %s, device_id %s", family, device_id
+            "Received LDI command for family",
+            extra={"parameters": parameters, "records": records},
         )
-
-        unique_id = f"ave_motion_{family}_{device_id}"  # Unique ID for the sensor
-
-        # Check if the sensor already exists
-        if unique_id in self.binary_sensors:
-            # Update the existing sensor's state
-            sensor = self.binary_sensors[unique_id]
-            sensor.update_state(device_status)
-        else:
-            # Create a new motion detection sensor
-            sensor = MotionBinarySensor(
-                unique_id=unique_id,
-                is_motion_detected=device_status > 0,
-                family=family,
-                device_id=device_id,
+        for record in records:
+            device_id, device_name, device_type = (
+                int(record[0]),
+                str(record[1]),
+                int(record[2]),
             )
-            self.binary_sensors[unique_id] = sensor
-            self.binary_sensor_async_add_entities(
-                [sensor]
-            )  # Add the new sensor to Home Assistant
+            if device_type == 12:
+                # Antitheft area
+                self.update_binary_sensor(self, 12, device_id, -1, device_name)
+            elif device_type == 11:
+                # Keypad
+                pass
+            elif device_type == 1:
+                self.update_switch(self, 1, device_id, -1, device_name)
+                # Light
+            elif device_type == 4:
+                # Thermostat
+                pass
+            elif device_type == 6:
+                # Scenario
+                pass
+            elif device_type == 8:
+                # Camera
+                pass
+            else:
+                _LOGGER.debug(
+                    "Unknown device type %s for %s, skipping", device_type, device_name
+                )
+                continue
+
+    async def switch_turn_on(self, device_id: int):
+        """Turn on the switch."""
+        if self.ws_conn and not self.ws_conn.closed:
+            await self.send_ws_command("EBI", [str(device_id), "11"])
+        else:
+            _LOGGER.error("WebSocket is not connected")
+
+    async def switch_turn_off(self, device_id: int):
+        """Turn off the switch."""
+        if self.ws_conn and not self.ws_conn.closed:
+            await self.send_ws_command("EBI", [str(device_id), "12"])
+        else:
+            _LOGGER.error("WebSocket is not connected")
+
+    async def switch_toggle(self, device_id: int):
+        """Turn off the switch."""
+        if self.ws_conn and not self.ws_conn.closed:
+            await self.send_ws_command("EBI", [str(device_id), "10"])
+        else:
+            _LOGGER.error("WebSocket is not connected")
+
+    async def wait3seconds(self):
+        """Wait for 3 seconds."""
+        await asyncio.sleep(3)
