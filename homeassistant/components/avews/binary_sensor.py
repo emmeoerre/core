@@ -95,6 +95,7 @@ def update_binary_sensor(
             sensor.set_name(name)
         elif name is not None and server.settings.get_entity_names:
             sensor.set_name(name)
+        _LOGGER.info("Creating new binary sensor entity %s", sensor.name)
         server.binary_sensors[unique_id] = sensor
         server.async_add_bs_entities([sensor])  # Add the new sensor to Home Assistant
 
@@ -114,7 +115,7 @@ class AveHubStatusBinarySensor(BinarySensorEntity):
         """Return the status of the hub."""
         return self._attr_is_on
 
-    async def async_update(self):
+    async def async_update(self) -> None:
         """Fetch the latest status from the web server."""
         self._attr_is_on = await self._ws.is_connected()
 

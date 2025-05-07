@@ -22,7 +22,7 @@ class AveWebServerSettings:
     fetch_lights: bool
     fetch_scenarios: bool
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the settings."""
         self.host = ""
         self.get_entity_names = False
@@ -218,7 +218,7 @@ class AveWebServer:
         if command == "pong":
             pass
         elif command == "ack":
-            _LOGGER.debug("Received ACK for command:", extra={"command": parameters[0]})
+            _LOGGER.debug("Received ACK for command: %s", parameters[0])
         elif command == "ping":
             await self.send_ws_command("PONG")
         elif command == "gsf":
@@ -233,9 +233,14 @@ class AveWebServer:
         elif command == "net":
             # IOT commands received from SU2
             pass
+        elif command == "nack":
+            _LOGGER.warning(
+                "Received NACK for command: %s",
+                parameters[0] if len(parameters) > 0 else "Unknown",
+            )
         else:
-            _LOGGER.error(
-                "Unknown command %s",
+            _LOGGER.warning(
+                "Received unknown command %s",
                 command,
                 extra={
                     "command": command,
@@ -331,8 +336,8 @@ class AveWebServer:
 
     def manage_gsf(self, parameters, records):
         """Manage GSF Get Status by Family commands received from the web server."""
-        _LOGGER.debug(
-            "Received GSF command for family %s",
+        _LOGGER.info(
+            "Received GSF (Get status by family) command for family %s",
             parameters[0],
             extra={"parameters": parameters, "records": records},
         )
@@ -351,8 +356,8 @@ class AveWebServer:
 
     def manage_ldi(self, parameters, records):
         """Manage LDI List Devices commands received from the web server."""
-        _LOGGER.debug(
-            "Received LDI command for family",
+        _LOGGER.info(
+            "Parsing LDI (List Devices) command",
             extra={"parameters": parameters, "records": records},
         )
         for record in records:

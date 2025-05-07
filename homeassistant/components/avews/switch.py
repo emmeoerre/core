@@ -1,6 +1,7 @@
 """Binary sensor platform for AVEWS integration."""
 
 import logging
+from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
@@ -72,6 +73,7 @@ def update_switch(server: AveWebServer, family, device_id, device_status, name=N
         )
         if name is not None and server.settings.get_entity_names:
             switch.set_name(name)
+        _LOGGER.info("Creating new switch entity %s", name)
         server.switches[unique_id] = switch
         server.async_add_sw_entities([switch])  # Add the new sensor to Home Assistant
 
@@ -101,17 +103,17 @@ class LightSwitch(SwitchEntity):
         else:
             self._name = name
 
-    async def async_toggle(self, **kwargs):
+    async def async_toggle(self, **kwargs: Any) -> None:
         """Toggle the switch."""
         if self._webserver:
             await self._webserver.switch_toggle(self.device_id)
 
-    async def async_turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         if self._webserver:
             await self._webserver.switch_turn_on(self.device_id)
 
-    async def async_turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         if self._webserver:
             await self._webserver.switch_turn_off(self.device_id)
