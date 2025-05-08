@@ -162,7 +162,7 @@ class AveWebServer:
             await self.send_ws_command("WSF", "12")
 
         await self.send_ws_command("SU3")  # Start streaming updates (most of them)
-        # await self.send_ws_command("SU2") # Starts streaming updates (UPD for TLO and XU , NET and CLD messages)
+        # await self.send_ws_command("SU2") # Starts streaming some other updates (UPD for TLO and XU , NET and CLD messages)
 
     def value_to_hex(self, value):
         """Return the herawstringalue of a number."""
@@ -264,27 +264,16 @@ class AveWebServer:
                 pass
             elif device_type == 1 and self.settings.fetch_lights:
                 self.update_switch(self, device_type, device_id, device_status, None)
-            # Async device updates. Will replace the polling approach
-
-            # device_type = int(parameters[1])
-            # device_id = int(parameters[2])
-            # device_status = int(parameters[3])
             # if device_type in [12, 13]:
             #     log_with_timestamp(f"Received async Antitheft status update. Device ID: {device_id}, Device Type: {device_type}, Status: {device_status}")
             # else:
-            #     log_with_timestamp(f"Received async status update. Device ID: {device_id}, Device Type: {device_type}, Status: {device_status}")
-            #     if device_type in [1, 2, 22, 9, 3, 16, 19, 6]:  # Limited to [Lighting / Energy / Shutters / Scenarios] for security reasons --- VER228 WANDA
-            #         for device in DOMINAPLUS_MANAGER_deviceList:
-            #             if "id" in device and "type" in device and int(device["id"]) == device_id and int(device["type"]) == device_type:
-            #                 device["currentVal"] = device_status
+            #     if device_type in [1, 2, 22, 9, 3, 16, 19, 6]:  # Limited to [Lighting / Energy / Shutters / Scenarios] for security reasons ---
         elif parameters[0] == "X" and parameters[1] == "A":  # ANTITHEFT AREA
             if not self.settings.fetch_sensor_areas:
                 # If the user doesn't want to fetch sensor areas, skip this
                 return
 
             # parameters[2] is the area ID. all other parameters are == 0 when triggered, parameters[6] == 1 when cleared
-            # really sensitive, better use a polling approach for now
-
             area_progressive = int(parameters[2])
             # area_engaged = int(parameters[3])
             # area_in_alarm = int(parameters[5])
@@ -293,7 +282,7 @@ class AveWebServer:
             if area_clear > 0:
                 status = 0
             self.update_binary_sensor(self, 12, area_progressive, status)
-            # log_with_timestamp(f"{ANTITHEFT_PREFIX} XA - areaID: {area_progressive} - engaged: {area_engaged} - clear: {area_clear} - alarm: {area_in_alarm}")
+            # (f"{ANTITHEFT_PREFIX} XA - areaID: {area_progressive} - engaged: {area_engaged} - clear: {area_clear} - alarm: {area_in_alarm}")
         elif parameters[0] == "X" and parameters[1] == "S":  # ANTITHEFT SENSOR
             if not self.settings.fetch_sensors:
                 # If the user doesn't want to fetch sensors, skip this
