@@ -27,9 +27,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AVE ws from a config entry."""
 
-    webserver = AveWebServer(entry.data, entry.data["get_entities_names"], hass)
+    webserver = AveWebServer(entry.data, hass)
     if not await webserver.authenticate():
-        _LOGGER.error("AVEWS: Cannot connect to the web server")
+        _LOGGER.error("AVE dominaplus: Cannot connect to the web server")
 
     entry.runtime_data = webserver
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

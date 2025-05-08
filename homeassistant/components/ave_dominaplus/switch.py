@@ -1,4 +1,4 @@
-"""Binary sensor platform for AVEWS integration."""
+"""Binary sensor platform for AVE dominaplus integration."""
 
 import logging
 from typing import Any
@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import BRAND_PREFIX
 from .web_server import AveWebServer
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up AVEWS binary sensors.
+    """Set up AVE dominaplus binary sensors.
 
     Args:
         hass: Home Assistant instance.
@@ -29,7 +30,7 @@ async def async_setup_entry(
     """
     webserver: AveWebServer = entry.runtime_data
     if not webserver:
-        _LOGGER.error("AVEWS: Web server not initialized")
+        _LOGGER.error("AVE dominaplus: Web server not initialized")
         raise ConfigEntryNotReady("Can't reach webserver")
 
     await webserver.set_async_add_sw_entities(async_add_entities)
@@ -43,14 +44,17 @@ def set_sensor_uid(family, device_id):
 
 def update_switch(server: AveWebServer, family, device_id, device_status, name=None):
     """Update switch based on the family and device status."""
-
-    if family not in [1]:
+    if family == 1:
+        if not server.settings.fetch_lights:
+            return
+    else:
         _LOGGER.debug(
             " Not updating switch for family %s, device_id %s",
             family,
             device_id,
         )
         return
+
     _LOGGER.debug(" Updating switch for family %s, device_id %s", family, device_id)
 
     unique_id = set_sensor_uid(family, device_id)
@@ -151,4 +155,4 @@ class LightSwitch(SwitchEntity):
             suffix = "light"
         elif self.family == 6:
             suffix = "sccenario"
-        return f"AVE {suffix} {self.device_id}"
+        return f"{BRAND_PREFIX} {suffix} {self.device_id}"

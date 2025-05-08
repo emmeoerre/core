@@ -38,7 +38,6 @@ class AveWebServer:
     def __init__(
         self,
         settings_data: MappingProxyType[str, Any],
-        get_entity_names: bool,
         hass: HomeAssistant,
     ) -> None:
         """Initialize."""
@@ -411,6 +410,23 @@ class AveWebServer:
         else:
             _LOGGER.error("WebSocket is not connected")
 
-    async def wait3seconds(self):
-        """Wait for 3 seconds."""
-        await asyncio.sleep(3)
+    async def call_bridge(self, command: str) -> tuple[int, str | None]:
+        """Call a xml "rest" bridge for common commands."""
+        async with aiohttp.ClientSession() as session:
+            try:
+                url = f"http://{self.settings.host}/bridge.php"
+                params = {"command": command}
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.text()
+                        _LOGGER.debug("Bridge response: %s", data)
+                        return response.status, data
+                    _LOGGER.error("Failed to call bridge. Status: %s", response.status)
+                    return response.status, None
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.error("Error calling bridge: %s", err)
+                return 900, None
+
+    async def get_device_list_bridge(self) -> tuple[int, str | None]:
+        """Get the device list from the bridge."""
+        return await self.call_bridge("LDI")

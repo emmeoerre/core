@@ -1,4 +1,4 @@
-"""Binary sensor platform for AVEWS integration."""
+"""Binary sensor platform for AVE dominaplus integration."""
 
 import logging
 
@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import BRAND_PREFIX
 from .web_server import AveWebServer
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up AVEWS binary sensors.
+    """Set up AVE dominaplus binary sensors.
 
     Args:
         hass: Home Assistant instance.
@@ -31,7 +32,7 @@ async def async_setup_entry(
     """
     webserver: AveWebServer = entry.runtime_data
     if not webserver:
-        _LOGGER.error("AVEWS: Web server not initialized")
+        _LOGGER.error("AVE dominaplus: Web server not initialized")
         raise ConfigEntryNotReady("Can't reach webserver")
     await webserver.set_update_binary_sensor(update_binary_sensor)
     await webserver.set_async_add_bs_entities(async_add_entities)
@@ -49,30 +50,26 @@ def update_binary_sensor(
 ):
     """Update binary sensors based on the family and device status."""
 
-    if family not in [12, 1007]:
+    if family == 12:
+        if not server.settings.fetch_sensor_areas:
+            return
+    elif family == 1007:
+        if not server.settings.fetch_sensors:
+            return
+    else:
         _LOGGER.debug(
             " Not updating binary sensor for family %s, device_id %s",
             family,
             device_id,
         )
         return
+
     _LOGGER.debug(
         " Updating binary sensor for family %s, device_id %s", family, device_id
     )
 
     unique_id = set_sensor_uid(family, device_id)
     already_exists = unique_id in server.binary_sensors
-
-    # if not already_exists:
-    #     entity_registry = er.async_get(server.hass)
-    #     existing_entity_id = entity_registry.async_get_entity_id(
-    #         "binary_sensor", DOMAIN, unique_id
-    #     )
-    #     if existing_entity_id:
-    #         _existing = entity_registry.async_get(existing_entity_id)
-    #         if _existing:
-    #             already_exists = True
-    #             server.binary_sensors[unique_id] = _existing
 
     # Check if the sensor already exists
     if already_exists:
@@ -101,7 +98,7 @@ def update_binary_sensor(
 
 
 class AveHubStatusBinarySensor(BinarySensorEntity):
-    """Binary sensor for AVEWS hub status."""
+    """Binary sensor for AVE dominaplus hub status."""
 
     def __init__(self, ws: AveWebServer, entry) -> None:
         """Initialize the binary sensor."""
@@ -177,4 +174,4 @@ class MotionBinarySensor(BinarySensorEntity):
             suffix = "antitheft area"
         elif self.family == 1007:
             suffix = "antitheft sensor"
-        return f"AVE {suffix} {self.device_id}"
+        return f"{BRAND_PREFIX} {suffix} {self.device_id}"

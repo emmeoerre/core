@@ -74,7 +74,7 @@ FLOWS = {
         "aurora_abb_powerone",
         "aussie_broadband",
         "autarco",
-        "avews",
+        "ave_dominaplus",
         "awair",
         "axis",
         "azure_data_explorer",
