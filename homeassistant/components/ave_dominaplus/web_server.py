@@ -295,7 +295,7 @@ class AveWebServer:
             self.update_binary_sensor(self, 12, area_progressive, status)
             # log_with_timestamp(f"{ANTITHEFT_PREFIX} XA - areaID: {area_progressive} - engaged: {area_engaged} - clear: {area_clear} - alarm: {area_in_alarm}")
         elif parameters[0] == "X" and parameters[1] == "S":  # ANTITHEFT SENSOR
-            if self.settings.fetch_sensors:
+            if not self.settings.fetch_sensors:
                 # If the user doesn't want to fetch sensors, skip this
                 return
             self.update_binary_sensor(
