@@ -32,6 +32,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("AVE dominaplus: Cannot connect to the web server")
 
     entry.runtime_data = webserver
+
+    # # Fetch the list of binary sensors already registered in Home Assistant
+    # entity_registry = er.async_get(hass)
+    # if entity_registry is not None:
+    #     entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    #     registered_sensors = {
+    #         entity.unique_id: {
+    #             "original_name": entity.original_name,
+    #             "name": entity.name,
+    #         }
+    #         for entity in entities
+    #         if entity.platform == "ave_dominaplus" and entity.domain == "binary_sensor"
+    #     }
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     hass.loop.create_task(webserver.start())

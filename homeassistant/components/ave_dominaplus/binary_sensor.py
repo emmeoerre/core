@@ -9,6 +9,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import BRAND_PREFIX
@@ -36,8 +37,51 @@ async def async_setup_entry(
         raise ConfigEntryNotReady("Can't reach webserver")
     await webserver.set_update_binary_sensor(update_binary_sensor)
     await webserver.set_async_add_bs_entities(async_add_entities)
+    await adopt_existing_sensors(webserver, entry)
     status_sensor = AveHubStatusBinarySensor(webserver, entry)
     async_add_entities([status_sensor])
+
+
+async def adopt_existing_sensors(server: AveWebServer, entry: ConfigEntry) -> None:
+    """Adopt existing sensors from the entity registry."""
+    try:
+        entity_registry = er.async_get(server.hass)
+        if entity_registry is None:
+            return
+        entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        for entity in entities:
+            if not (
+                entity.platform == "ave_dominaplus"
+                and entity.domain == "binary_sensor"
+                and entity.original_device_class == "motion"
+            ):
+                continue
+            # Check if the sensor is already registered
+            if entity.unique_id not in server.binary_sensors:
+                # Create a new sensor instance
+                family = int(entity.unique_id.split("_")[2])
+                if family == 12 and not server.settings.fetch_sensor_areas:
+                    continue
+                if family == 1007 and not server.settings.fetch_sensors:
+                    continue
+                ave_device_id = int(entity.unique_id.split("_")[3])
+                sensor = MotionBinarySensor(
+                    unique_id=entity.unique_id,
+                    family=family,
+                    ave_device_id=ave_device_id,
+                    is_motion_detected=None,
+                )
+                # Set the name of the sensor
+                if entity.has_entity_name:
+                    sensor.set_name(entity.name)
+                elif entity.original_name is not None:
+                    sensor.set_name(entity.original_name)
+
+                server.binary_sensors[entity.unique_id] = sensor
+                server.async_add_bs_entities([sensor])
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.error("Error adopting existing sensors: %s", str(e))
+        # raise ConfigEntryNotReady("Error adopting existing sensors") from e
 
 
 def set_sensor_uid(family, device_id):
@@ -46,7 +90,7 @@ def set_sensor_uid(family, device_id):
 
 
 def update_binary_sensor(
-    server: AveWebServer, family, device_id, device_status, name=None
+    server: AveWebServer, family, ave_device_id, device_status, name=None
 ):
     """Update binary sensors based on the family and device status."""
 
@@ -60,15 +104,15 @@ def update_binary_sensor(
         _LOGGER.debug(
             " Not updating binary sensor for family %s, device_id %s",
             family,
-            device_id,
+            ave_device_id,
         )
         return
 
     _LOGGER.debug(
-        " Updating binary sensor for family %s, device_id %s", family, device_id
+        " Updating binary sensor for family %s, device_id %s", family, ave_device_id
     )
 
-    unique_id = set_sensor_uid(family, device_id)
+    unique_id = set_sensor_uid(family, ave_device_id)
     already_exists = unique_id in server.binary_sensors
 
     # Check if the sensor already exists
@@ -78,23 +122,43 @@ def update_binary_sensor(
         if device_status >= 0:
             sensor.update_state(device_status)
         if name is not None and server.settings.get_entity_names:
-            sensor.set_name(name)
+            if not check_name_changed(server.hass, unique_id):
+                sensor.set_name(name)
     else:
         # Create a new motion detection sensor
         sensor = MotionBinarySensor(
             unique_id=unique_id,
             is_motion_detected=device_status > 0,
             family=family,
-            device_id=device_id,
+            ave_device_id=ave_device_id,
         )
         if family == 1007:
             name = sensor.build_name()
-            sensor.set_name(name)
+            if not check_name_changed(server.hass, unique_id):
+                sensor.set_name(name)
         elif name is not None and server.settings.get_entity_names:
-            sensor.set_name(name)
+            if not check_name_changed(server.hass, unique_id):
+                sensor.set_name(name)
         _LOGGER.info("Creating new binary sensor entity %s", sensor.name)
         server.binary_sensors[unique_id] = sensor
         server.async_add_bs_entities([sensor])  # Add the new sensor to Home Assistant
+
+
+def check_name_changed(hass: HomeAssistant, unique_id: str) -> bool:
+    """Check if the name of the sensor has changed."""
+    entity_registry = er.async_get(hass)
+
+    entry_id = entity_registry.async_get_entity_id(
+        "binary_sensor", "ave_dominaplus", unique_id
+    )
+    if entry_id:
+        entity_entry = entity_registry.async_get(entry_id)
+        if entity_entry is not None:
+            return (
+                entity_entry.has_entity_name
+                and entity_entry.original_name != entity_entry.name
+            )
+    return False
 
 
 class AveHubStatusBinarySensor(BinarySensorEntity):
@@ -124,19 +188,20 @@ class MotionBinarySensor(BinarySensorEntity):
         self,
         unique_id: str,
         family: int,
-        device_id: int,
-        is_motion_detected: int,
+        ave_device_id: int,
+        is_motion_detected: int | None,
         name=None,
     ) -> None:
         """Initialize the motion detection sensor."""
         self._unique_id = unique_id
         self._is_motion_detected = is_motion_detected
-        self.device_id = device_id
+        self.ave_device_id = ave_device_id
         self.family = family
         if name is None:
             self._name = self.build_name()
         else:
             self._name = name
+        self._attr_family = family
 
     @property
     def unique_id(self) -> str:
@@ -149,8 +214,10 @@ class MotionBinarySensor(BinarySensorEntity):
         return self._name
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return True if motion is detected."""
+        if self._is_motion_detected is None:
+            return None
         return self._is_motion_detected > 0
 
     @property
@@ -158,13 +225,16 @@ class MotionBinarySensor(BinarySensorEntity):
         """Return the device class of the sensor."""
         return BinarySensorDeviceClass.MOTION
 
-    def update_state(self, is_motion_detected: int):
+    def update_state(self, is_motion_detected: int | None):
         """Update the state of the sensor."""
-        self._is_motion_detected = is_motion_detected
-        self.async_write_ha_state()  # Notify Home Assistant of the state change
+        if is_motion_detected is not None:
+            self._is_motion_detected = is_motion_detected
+            self.async_write_ha_state()  # Notify Home Assistant of the state change
 
-    def set_name(self, name: str):
+    def set_name(self, name: str | None):
         """Set the name of the sensor."""
+        if name is None:
+            return
         self._name = name
 
     def build_name(self) -> str:
@@ -174,4 +244,4 @@ class MotionBinarySensor(BinarySensorEntity):
             suffix = "antitheft area"
         elif self.family == 1007:
             suffix = "antitheft sensor"
-        return f"{BRAND_PREFIX} {suffix} {self.device_id}"
+        return f"{BRAND_PREFIX} {suffix} {self.ave_device_id}"
