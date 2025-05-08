@@ -1,6 +1,7 @@
 """Binary sensor platform for AVE dominaplus integration."""
 
 import logging
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -11,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util.dt import utcnow
 
 from .const import BRAND_PREFIX
 from .web_server import AveWebServer
@@ -122,6 +124,7 @@ def update_binary_sensor(
         if device_status >= 0:
             sensor.update_state(device_status)
         if name is not None and server.settings.get_entity_names:
+            sensor.set_ave_name(name)
             if not check_name_changed(server.hass, unique_id):
                 sensor.set_name(name)
     else:
@@ -138,6 +141,7 @@ def update_binary_sensor(
                 sensor.set_name(name)
         elif name is not None and server.settings.get_entity_names:
             if not check_name_changed(server.hass, unique_id):
+                sensor.set_ave_name(name)
                 sensor.set_name(name)
         _LOGGER.info("Creating new binary sensor entity %s", sensor.name)
         server.binary_sensors[unique_id] = sensor
@@ -197,6 +201,10 @@ class MotionBinarySensor(BinarySensorEntity):
         self._is_motion_detected = is_motion_detected
         self.ave_device_id = ave_device_id
         self.family = family
+        self._last_revealed: str | None = None
+        self._last_cleared: str | None = None
+        self._ave_name: str | None = None
+
         if name is None:
             self._name = self.build_name()
         else:
@@ -225,9 +233,29 @@ class MotionBinarySensor(BinarySensorEntity):
         """Return the device class of the sensor."""
         return BinarySensorDeviceClass.MOTION
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        info = {
+            "last_revealed": self._last_revealed,
+            "last_cleared": self._last_cleared,
+            "AVE_family": self.family,
+            "AVE_device_id": self.ave_device_id,
+        }
+        if self.family != 1007:
+            info["AVE_name"] = self._ave_name
+        return info
+
     def update_state(self, is_motion_detected: int | None):
         """Update the state of the sensor."""
         if is_motion_detected is not None:
+            try:
+                if is_motion_detected > 0:
+                    self._last_revealed = utcnow().isoformat()
+                elif self._is_motion_detected:
+                    self._last_cleared = utcnow().isoformat()
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.error("Error updating last revealed state: %s", str(e))
             self._is_motion_detected = is_motion_detected
             self.async_write_ha_state()  # Notify Home Assistant of the state change
 
@@ -236,6 +264,12 @@ class MotionBinarySensor(BinarySensorEntity):
         if name is None:
             return
         self._name = name
+
+    def set_ave_name(self, name: str | None):
+        """Set the original name of the sensor."""
+        if name is not None:
+            self._ave_name = name
+            self.async_write_ha_state()  # Notify Home Assistant of the state change
 
     def build_name(self) -> str:
         """Build the name of the sensor based on its family and device ID."""

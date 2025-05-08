@@ -106,6 +106,7 @@ def update_switch(
         if device_status >= 0:
             switch.update_state(device_status)
         if name is not None and server.settings.get_entity_names:
+            switch.set_ave_name(name)
             if not check_name_changed(server.hass, unique_id):
                 switch.set_name(name)
     else:
@@ -118,6 +119,7 @@ def update_switch(
             webserver=server,
         )
         if name is not None and server.settings.get_entity_names:
+            switch.set_ave_name(name)
             if not check_name_changed(server.hass, unique_id):
                 switch.set_name(name)
         _LOGGER.info("Creating new switch entity %s", name)
@@ -157,9 +159,11 @@ class LightSwitch(SwitchEntity):
         """Initialize the motion detection sensor."""
         self._unique_id = unique_id
         self._is_on = is_on
-        self.device_id = ave_device_id
+        self.ave_device_id = ave_device_id
         self.family = family
         self._webserver = webserver
+        self._ave_name: str | None = None
+
         if is_on is not None and is_on >= 0:
             self._attr_is_on = bool(is_on)  # Initialize the state
         if name is None:
@@ -170,17 +174,17 @@ class LightSwitch(SwitchEntity):
     async def async_toggle(self, **kwargs: Any) -> None:
         """Toggle the switch."""
         if self._webserver:
-            await self._webserver.switch_toggle(self.device_id)
+            await self._webserver.switch_toggle(self.ave_device_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         if self._webserver:
-            await self._webserver.switch_turn_on(self.device_id)
+            await self._webserver.switch_turn_on(self.ave_device_id)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         if self._webserver:
-            await self._webserver.switch_turn_off(self.device_id)
+            await self._webserver.switch_turn_off(self.ave_device_id)
 
     @property
     def unique_id(self) -> str:
@@ -197,6 +201,15 @@ class LightSwitch(SwitchEntity):
         """Return the device class of the sensor."""
         return SwitchDeviceClass.SWITCH
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        return {
+            "AVE_family": self.family,
+            "AVE_device_id": self.ave_device_id,
+            "AVE_name": self._ave_name,
+        }
+
     def update_state(self, is_on: int):
         """Update the state of the switch."""
         if is_on is None:
@@ -212,6 +225,12 @@ class LightSwitch(SwitchEntity):
             return
         self._name = name
 
+    def set_ave_name(self, name: str | None):
+        """Set the AVE name of the sensor."""
+        if name is not None:
+            self._ave_name = name
+            self.async_write_ha_state()  # Notify Home Assistant of the state change
+
     def build_name(self) -> str:
         """Build the name of the sensor based on its family and device ID."""
         suffix = "sensor type " + str(self.family)
@@ -219,4 +238,4 @@ class LightSwitch(SwitchEntity):
             suffix = "light"
         elif self.family == 6:
             suffix = "sccenario"
-        return f"{BRAND_PREFIX} {suffix} {self.device_id}"
+        return f"{BRAND_PREFIX} {suffix} {self.ave_device_id}"
