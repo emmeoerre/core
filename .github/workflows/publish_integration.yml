@@ -1,6 +1,7 @@
 name: Publish Ave Dominaplus Integration
 
 "on":
+  workflow_dispatch:
   push:
     paths:
       - "homeassistant/components/ave_dominaplus/**"
