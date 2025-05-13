@@ -10,6 +10,10 @@
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
+  "mounts": [
+    // Custom component
+    "source=/mnt/c/users/morop/gitprivate/ave_dominaplus/custom_components/ave_dominaplus,target=${containerWorkspaceFolder}/config/custom_components/ave_dominaplus,type=bind"
+  ],
   // Port 5683 udp is used by Shelly integration
   "appPort": ["8123:8123", "5683:5683/udp"],
   "runArgs": [
