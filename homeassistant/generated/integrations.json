@@ -630,6 +630,12 @@
       "config_flow": true,
       "iot_class": "cloud_polling"
     },
+    "ave_dominaplus": {
+      "name": "AVE dominaplus",
+      "integration_type": "hub",
+      "config_flow": true,
+      "iot_class": "local_push"
+    },
     "avion": {
       "name": "Avi-on",
       "integration_type": "hub",

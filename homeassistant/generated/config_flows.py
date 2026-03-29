@@ -82,6 +82,7 @@ FLOWS = {
         "aurora_abb_powerone",
         "aussie_broadband",
         "autarco",
+        "ave_dominaplus",
         "awair",
         "aws_s3",
         "axis",

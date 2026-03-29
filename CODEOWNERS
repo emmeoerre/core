@@ -186,6 +186,7 @@ build.json @home-assistant/supervisor
 /tests/components/auth/ @home-assistant/core
 /homeassistant/components/automation/ @home-assistant/core
 /tests/components/automation/ @home-assistant/core
+/homeassistant/components/ave_dominaplus/ @emmeoerre
 /homeassistant/components/avea/ @pattyland
 /homeassistant/components/awair/ @ahayworth @ricohageman
 /tests/components/awair/ @ahayworth @ricohageman

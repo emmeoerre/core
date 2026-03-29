@@ -1,0 +1,37 @@
+name: Publish Ave Dominaplus Integration
+
+"on":
+  workflow_dispatch:
+  push:
+    paths:
+      - "homeassistant/components/ave_dominaplus/**"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.13
+
+      - name: Copy integration files
+        run: |
+          mkdir -p ave_dominaplus_repo/custom_components/ave_dominaplus
+          cp -r homeassistant/components/ave_dominaplus/* ave_dominaplus_repo/custom_components/ave_dominaplus/
+
+      - name: Push to target repository
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ave_dominaplus_repo
+          git init
+          git remote add origin https://github.com/${{ github.repository_owner }}/ave_dominaplus.git
+          git add .
+          git commit -m "Update Ave Dominaplus integration"
+          git branch -M develop
+          git push -f origin develop
